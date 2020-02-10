@@ -1,10 +1,10 @@
 import pytube
+import os
 
-from helpers import Helpers
 from pytube import YouTube
 from pytube.exceptions import RegexMatchError, VideoUnavailable
 
-# https://python-pytube3.readthedocs.io/en/latest/user/quickstart.html
+from helpers import logger, APP_NAME
 
 
 class Video:
@@ -23,7 +23,7 @@ class Video:
         """
         self.url = url
         self.progress_callback = progress_callback
-        self.logger = Helpers.logging_setup("logs/", "Video Downloader")
+        # self.logger = Helpers.logging_setup("logs/", "Video Downloader")
 
     @property
     def videoId(self):
@@ -50,7 +50,7 @@ class Video:
         raise NotImplementedError
 
     @property
-    def videoStreamQuality(self):
+    def allVideoStreams(self):
         """ Return the available stream qualities of the video.
 
         This method should be overriden in the (Service)Video class.
@@ -81,16 +81,25 @@ class YouTubeVideo(Video):
         try:
             self.yt = YouTube(
                 url, on_progress_callback=progress_callback)
+            logger.info(f"URL: {self.url}")
         except RegexMatchError:
             # Catches a Regex Error from URLs with invalid format
-            self.logger.error("Caught error: RegexMatchError")
-            self.logger.error(f"Inputted link \"{url}\" is not a valid URL")
+            logger.error("Caught error: RegexMatchError")
+            logger.error(f"Inputted link \"{url}\" is not a valid URL")
             self.error = f"{url} is an invalid URL"
         except VideoUnavailable:
             # Catches a VideoUnavailable Error if pytube cannot process the video
-            self.logger.error(f"Caught error: VideoUnavailable")
-            self.logger.error(f"Inputted link \"{url}\" does not exist")
+            logger.error(f"Caught error: VideoUnavailable")
+            logger.error(f"Inputted link \"{url}\" does not exist")
             self.error = f"{url} does not exist"
+        except Exception as errorMessage:
+            # Catches any other unexpected error
+            exceptionName = errorMessage.__class__.__name__
+            logger.error(f"General Error Caught: {exceptionName}")
+            logger.error(f"{errorMessage}")
+            self.error = f"{exceptionName}:\n{errorMessage}"
+        '''finally:
+            self.logger.error(f"")'''
 
     @property
     def videoId(self):
@@ -110,6 +119,7 @@ class YouTubeVideo(Video):
 
         """
         if not self.error:
+            logger.info(f"Video Title: {self.yt.title}")
             return self.yt.title
 
     @property
@@ -120,22 +130,59 @@ class YouTubeVideo(Video):
 
         """
         if not self.error:
+            logger.info(f"Video Thumbnail: {self.yt.thumbnail_url}")
             return self.yt.thumbnail_url
 
     @property
-    def videoStreamQuality(self):
-        """ Get the available stream qualities of the video.
+    def allVideoStreams(self):
+        """ Get all available streams of the video.
 
         Override the correspondent method in the Video class.
 
         Returns:
-        A list of stream object consisting of the available stream qualities for the video
+        A list of stream objects consisting of the available stream qualities for the video
 
         """
         if not self.error:
             return self.yt.streams.all()
 
-    def download(self, location='./downloads', quality=None):
+    @property
+    def audioStreams(self):
+        """ Get audio streams of the video.
+
+        Override the correspondent method in the Video class.
+
+        Returns:
+        A list of audio stream objects consisting of the available stream qualities for the video
+
+        """
+        return self.yt.streams.filter(only_audio=True).all()
+
+    @property
+    def adaptiveVideoStreams(self):
+        """ Get adaptive streams of the video.
+
+        Override the correspondent method in the Video class.
+
+        Returns:
+        A list of adaptive stream objects consisting of the available stream qualities for the video
+
+        """
+        return self.yt.streams.filter(adaptive=True).all()
+
+    @property
+    def progressiveVideoStreams(self):
+        """ Get progressive streams of the video.
+
+        Override the correspondent method in the Video class.
+
+        Returns:
+        A list of progressive stream objects consisting of the available stream qualities for the video
+
+        """
+        return self.yt.streams.filter(progressive=True).all()
+
+    def download(self, location='./downloads', itag=None):
         """ Download the video. Default save location is './downloads'
 
         Override the same method in the Video class.
@@ -145,7 +192,26 @@ class YouTubeVideo(Video):
             quality: The stream quality of the video to be downloaded
 
         """
-        # TODO: support manual directory entry
         if not self.error:
-            if quality is None:
+            if itag is None:
+                # This will often be a progressive stream, which audio is included
                 self.yt.streams.first().download(location)
+            else:
+                # download video stream
+                stream = self.yt.streams.get_by_itag(itag)
+                video_filename = f"{self.yt.title} ({stream.resolution or stream.abr})"
+                stream.download(output_path=location, filename=video_filename)
+                # TODO: re-enable for adaptive stream support
+                """
+                # download audio stream for adaptive streams
+                audio_filename = self.yt.streams.filter(
+                    only_audio=True).first().download(output_path=location)
+                # get absolute path
+                os.path.abspath(location)
+                """
+
+
+if __name__ == "__main__":
+    video = YouTubeVideo("https://www.youtube.com/watch?v=7BgcG_l9J0A")
+    streams = video.allVideoStreams()
+    print(streams)
